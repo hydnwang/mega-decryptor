@@ -1,0 +1,195 @@
+<!--
+Inspired by
+https://gist.github.com/mndza/74736feb073fc6b65334#file-gistfile1-html
+https://github.com/denysvitali/megadecrypter
+https://gist.github.com/artjomb/7ef1ee574a411ba0dd1933c1ef4690d1
+About Mega Links
+http://megadownloaderapp.blogspot.com/2013/03/explaining-mega-links.html
+-->
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mega Link Decrypter</title>
+</head>
+
+<body>
+    <header>
+        <h1>Mega Link Decrypter</h1>
+        <h2>Decipher <code>mega://(f)enc?</code> or <code>mega://(f)enc2?</code> links</h2>
+    </header>
+    <main>
+        <section>
+            <label for="link">Mega Link: </label>
+            <input id="link" type="text" style="width:80%" placeholder="Paste link here, and then press enter or click Decrypt">
+            <button id="decrypt">Decrypt</button>
+        </section>
+        <section style="margin-top:10px;">
+            <label for="result">Original URL: </label>
+            <a id="result" href="" target="_blank"></a>
+            <span id="error" style="color:red"></span>
+            <button id="copy" style="visibility: hidden">Copy</button>
+            <input type="text" id="result-input" style="display: none;" />
+        </section>
+    </main>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.9-1/crypto-js.min.js"></script>
+    <script>
+        var result = document.getElementById("result");
+        var error = document.getElementById("error");
+        var copy = document.getElementById("copy");
+        var resultInput = document.getElementById("result-input");
+        var link = document.getElementById("link");
+        var decrypt = document.getElementById("decrypt");
+
+        // add event listeners
+        decrypt.addEventListener("click", function (event) {
+            error.innerHTML = "";
+            result.innerHTML = "";
+            copy.style.visibility = "hidden";
+            try {
+                originURL = decryptURL(link.value);
+                result.innerHTML = originURL;
+                result.href = originURL;
+                resultInput.value = originURL;
+                copy.style.visibility = "visible";
+            } catch (e) {
+                error.innerHTML = e.message;
+            }
+        });
+        link.addEventListener("keyup", function (event) {
+            event.preventDefault();
+            if (event.keyCode === 13) {
+                decrypt.click();
+            }
+        });
+        copy.addEventListener("click", function (event) {
+            resultInput.style.display = "block";
+            resultInput.select()
+            document.execCommand('copy')
+            resultInput.style.display = "none";
+        });
+
+        // main
+        // example:
+        // version 1
+        // mega://enc?sjh3hoftyW8m5MmJDKW1c4TApgdMHLa2t7vtGQnag8VhGElc7r2JMrOdLqX0qpGR-MIqFh0jjxR0-NlAKxAuTQ
+        // mega://fenc?ahc5Kx7gP-41l8GlalamcPAq9GqCMIALVCUNgvmKLh8BOwFYBaxWRkN-vsHFmOwo
+        // version 2
+        // mega://enc2?VdFBBVBv_AUzfGCkXt_Qrw5pC0PjzWzj3trelIvZZ4fRNuVo5GVeyepiMWqNb08eQUOk1sBvU0UqXriiOnnaVw
+        // mega://fenc2?6Bn4WcYTWhHDGfi7WnrnTwOukwhWy6Q1UPtKeARrrkL1Dt5Kyrt0w2XaCPYy9Htf
+        var decryptURL = function (url) {
+            var rootURL = "https://mega.nz/#";
+            var isFolder = url.charAt(7) === "f" ? true : false;
+            if (isFolder) {
+                rootURL += "F"
+            }
+            var urlpatterns = {
+                megadownloaderapp: {
+                    regexp: new RegExp("mega://f?enc?\\?([A-Za-z0-9-_,]+)", 'i'),
+                    process: megadownloaderappDecrypt
+                },
+                megadownloaderapp2: {
+                    regexp: new RegExp("mega://f?enc2?\\?([A-Za-z0-9-_,]+)", 'i'),
+                    process: megadownloaderappDecrypt2
+                }
+            };
+
+            var pass = false
+            for (pattern in urlpatterns) {
+                var match = urlpatterns[pattern].regexp.exec(url);
+                if (match != null) {
+                    pass = true
+                    str = urlpatterns[pattern].process(match[1]);
+                    if (str !== "") {
+                        return rootURL + str
+                    }
+                }
+            }
+            if (!pass) {
+                throw new Error("Invalid Mega Link")
+            }
+            throw new Error("Decrypt Failed")
+        };
+
+        var megadownloaderappDecrypt2 = function (str) {
+            var password = [237, 31, 76, 32, 11, 53, 19, 152, 6, 178, 96, 86, 59, 61, 56, 118, 240, 17, 180, 117, 15, 58, 26, 74, 94, 253, 11, 190, 103, 85, 75, 68];
+            var iv = CryptoJS.enc.Hex.parse("79F10A01844A0B27FF5B2D4E0ED3163E");
+
+            // Recover Base64 from encoded string
+            var b64str = str;
+            b64str += "==".substring((2 - b64str.length * 3) & 3);
+            b64str = b64str.replace(new RegExp("-", 'g'), "+").replace(new RegExp("_", 'g'), "/").replace(new RegExp(",", 'g'), "");
+
+            // Decoding step
+            var encryptedText = CryptoJS.enc.Base64.parse(b64str);
+
+            var byteArrayToWordArray = function (byteArray) {
+                var wordArray = [], i;
+                for (i = 0; i < byteArray.length; i++) {
+                    wordArray[(i / 4) | 0] |= byteArray[i] << (24 - 8 * i);
+                }
+                return CryptoJS.lib.WordArray.create(wordArray, byteArray.length);
+            }
+
+            var key = byteArrayToWordArray(password)
+
+            var aes = CryptoJS.algo.AES.createDecryptor(key, {
+                mode: CryptoJS.mode.CBC,
+                padding: CryptoJS.pad.Pkcs7,
+                iv: iv
+            });
+            var decrypted = aes.finalize(encryptedText);
+
+            // Helper function to convert hex to ASCII
+            var hex2ascii = function (hex) {
+                var str = '';
+                for (var i = 0; i < hex.length; i += 2)
+                    str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+                return str;
+            }
+
+            // Return final URI
+            return hex2ascii(decrypted.toString());
+        }
+
+        var megadownloaderappDecrypt = function (str) {
+            // Password is "k1o6Al-1kz¿!z05y", but System.Text.Encoding.ASCII.GetBytes in VB.NET replaces 8-bit characters with '?'
+            var password = "k1o6Al-1kz?!z05y";
+
+            // IV = {121, 241, 10, 1, 132, 74, 11, 39, 255, 91, 45, 78, 14, 211, 22, 62}
+            var iv = CryptoJS.enc.Hex.parse("79F10A01844A0B27FF5B2D4E0ED3163E");
+
+            while (password.length < 32) { password += "X"; } // 256 bit password padding
+
+            // Recover Base64 from encoded string
+            var b64str = str;
+            b64str += "==".substring((2 - b64str.length * 3) & 3);
+            b64str = b64str.replace(new RegExp("-", 'g'), "+").replace(new RegExp("_", 'g'), "/").replace(new RegExp(",", 'g'), "");
+
+            // Decoding step
+            var encryptedText = CryptoJS.enc.Base64.parse(b64str);
+            var key = CryptoJS.enc.Utf8.parse(password);
+            var aes = CryptoJS.algo.AES.createDecryptor(key, {
+                mode: CryptoJS.mode.CBC,
+                padding: CryptoJS.pad.Pkcs7,
+                iv: iv
+            });
+            var decrypted = aes.finalize(encryptedText);
+
+            // Helper function to convert hex to ASCII
+            var hex2ascii = function (hex) {
+                var str = '';
+                for (var i = 0; i < hex.length; i += 2)
+                    str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+                return str;
+            }
+
+            // Return final URI
+            return hex2ascii(decrypted.toString());
+        };
+    </script>
+</body>
+
+</html>
